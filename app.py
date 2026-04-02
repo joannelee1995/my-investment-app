@@ -110,7 +110,6 @@ if stocks_df is not None:
             t_c = str(row['code'])
             if t_c == "9999": continue
             
-            # 手機版優化：使用一整行顯示資訊，避免被拆散
             try:
                 success = False
                 for suffix in [".TW", ".TWO"]:
@@ -122,26 +121,32 @@ if stocks_df is not None:
                         color = "#ff4b4b" if d > 0 else "#00ff41" if d < 0 else "#ffffff"
                         m_icon = "▲" if d > 0 else "▼" if d < 0 else "─"
                         
-                        # 改用一列四格，但在手機上這會自動壓縮。
-                        # 我們改用 st.write 配合 Markdown 來強制排版
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
+                        # --- 核心優化：整合卡片與微型刪除鍵 ---
+                        # 這裡把比例調成 20:1，讓刪除鍵變得很邊緣
+                        card_col, del_col = st.columns([20, 1]) 
+                        with card_col:
                             st.markdown(f"""
-                            <div style="display: flex; justify-content: space-between; align-items: center; background: #262730; padding: 10px; border-radius: 5px; margin-bottom: 2px;">
-                                <div style="flex: 1;"><b>{t_c}</b> {row['name']}</div>
-                                <div style="flex: 1; text-align: center;"><b>{cp:.2f}</b></div>
-                                <div style="flex: 1; text-align: right; color: {color};">{m_icon} {abs(d):.2f} ({p:+.2f}%)</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; background: #1e2129; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; border-left: 3px solid {color};">
+                                <div style="flex: 1.2;">
+                                    <div style="font-size: 0.7rem; color: #888; line-height: 1;">{t_c}</div>
+                                    <div style="font-size: 0.95rem; font-weight: 600;">{row['name']}</div>
+                                </div>
+                                <div style="flex: 1; text-align: center; font-size: 1.05rem; font-weight: 700;">{cp:.2f}</div>
+                                <div style="flex: 1.2; text-align: right; color: {color}; font-size: 0.85rem; line-height: 1.1;">
+                                    <b>{m_icon} {abs(d):.2f}</b><br><span style="font-size: 0.75rem;">({p:+.2f}%)</span>
+                                </div>
                             </div>
                             """, unsafe_allow_html=True)
-                        with c2:
-                            if st.button("❌", key=f"del_{g}_{t_c}"):
+                        with del_col:
+                            # 移除紅色背景，改用透明的小叉叉
+                            if st.button("×", key=f"del_{g}_{t_c}", help="移除"):
                                 conn.update(spreadsheet=SP_URL, worksheet="stocks", data=stocks_df[~((stocks_df['group'] == g) & (stocks_df['code'] == t_c))])
                                 st.cache_data.clear()
                                 st.rerun()
                         success = True
                         break
             except:
-                st.caption(f"{t_c} 讀取中...")
+                continue
 
 st.divider()
 st.header("📝 雲端筆記")
