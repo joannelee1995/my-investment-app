@@ -32,18 +32,18 @@ try:
         diff = now - prev
         pct = (diff / prev) * 100
         
-        # 判定市場情緒與力度 (恢復你喜歡的明確評語)
-        if pct >= 1.5: sentiment = "🔥 強勢噴發"
-        elif 0.5 <= pct < 1.5: sentiment = "📈 溫和上漲"
-        elif -0.5 < pct < 0.5: sentiment = "⚖️ 盤整震盪"
-        elif -1.5 < pct <= -0.5: sentiment = "📉 震盪回檔"
-        else: sentiment = "😨 恐慌殺盤"
+        # 判定市場情緒 (客觀描述)
+        if pct >= 1.0: sentiment = "📈 強勢"
+        elif 0.2 <= pct < 1.0: sentiment = "↗️ 上漲"
+        elif -0.2 < pct < 0.2: sentiment = "⚖️ 平盤震盪"
+        elif -1.0 < pct <= -0.2: sentiment = "↘️ 回檔"
+        else: sentiment = "📉 跌幅較大"
         
         m_icon = "🔴" if diff > 0 else "🟢"
         
         c1, c2, c3 = st.columns(3)
         c1.metric("加權指數", f"{now:,.2f}", f"{m_icon} {diff:+.2f} ({pct:+.2f}%)")
-        c2.metric("市場情緒", sentiment, f"趨勢力道: {m_icon}")
+        c2.metric("當前盤勢", sentiment, f"趨勢標示: {m_icon}")
         c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
 except:
     st.write("大盤數據讀取中...")
@@ -63,7 +63,7 @@ st.divider()
 # --- 3. 自選股群組管理 ---
 st.header("🗂️ 自選股群組管理")
 
-with st.expander("⚙️ 管理群組與個股 (展開編輯)", expanded=True):
+with st.expander("⚙️ 管理群組與個股 (點此編輯)", expanded=True):
     g1, g2 = st.columns(2)
     new_g = g1.text_input("1. 建立新分類")
     if g1.button("新增分類"):
@@ -74,8 +74,8 @@ with st.expander("⚙️ 管理群組與個股 (展開編輯)", expanded=True):
     st.write("---")
     target_g = st.selectbox("2. 選擇分類", list(st.session_state.stock_groups.keys()))
     c_col1, c_col2 = st.columns(2)
-    s_code = c_col1.text_input("3. 股票代碼 (數字)")
-    s_name = c_col2.text_input("4. 股票名稱 (中文)")
+    s_code = c_col1.text_input("3. 代碼")
+    s_name = c_col2.text_input("4. 名稱 (選填)")
     
     if st.button("確認加入"):
         if s_code:
@@ -111,26 +111,22 @@ for group, stocks in st.session_state.stock_groups.items():
                     st.session_state.stock_groups[group].remove(item)
                     st.rerun()
         except:
-            st.caption(f"{item.get('code', '個股')} 數據讀取中...")
+            st.write(f"⚠️ {item.get('code')} 資料讀取中...")
 
 st.divider()
 
 # --- 4. 討論筆記紀錄 ---
 st.header("📝 討論筆記紀錄")
-with st.form("note_v6", clear_on_submit=True):
+with st.form("note_form_v3_final", clear_on_submit=True):
     n1, n2 = st.columns(2)
-    nt = n1.text_input("本週主題")
-    nk = n2.text_input("標籤 (逗號隔開)")
+    nt = n1.text_input("主題")
+    nk = n2.text_input("標籤")
     nc = st.text_area("對話重點筆記")
     if st.form_submit_button("儲存紀錄"):
         if nt:
             st.session_state.notes.append({"T": nt, "K": [k.strip() for k in nk.split(",")], "C": nc})
-            st.success("紀錄已儲存！")
+            st.success("成功儲存")
 
 if st.session_state.notes:
     all_k = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
-    sel = st.multiselect("💡 點選標籤過濾筆記內容", all_k)
-    for n in reversed(st.session_state.notes):
-        if not sel or any(tag in sel for tag in n["K"]):
-            with st.expander(f"📌 {n['T']} (標籤: {', '.join(n['K'])})"):
-                st.write(n['C'])
+    sel = st.multiselect("💡 標籤過濾
