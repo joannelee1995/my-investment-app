@@ -5,18 +5,18 @@ from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 import urllib.parse
 
-# 1. 基本設定
-st.set_page_config(page_title="台股投資戰情室", layout="wide")
+# 1. 網頁基本設定
+st.set_page_config(page_title="台股投資戰情室 3.0", layout="wide")
 st.markdown("<style>[data-testid='stMetricDelta'] svg { display: none; }</style>", unsafe_allow_html=True)
 
 # 2. 連接 Google Sheets
 SP_URL = "https://docs.google.com/spreadsheets/d/1pSVEg5J_-tg0wetPxNUVb9cU6kapUL_NIEV_Xz84PDM/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- A. 處理刪除請求 (個股 & 筆記) ---
+# --- A. 處理所有刪除請求 (個股 & 筆記) ---
 query_params = st.query_params
 
-# 刪除個股
+# 刪除個股邏輯
 if "delete_code" in query_params:
     try:
         d_c = str(query_params["delete_code"]).strip()
@@ -27,26 +27,23 @@ if "delete_code" in query_params:
         conn.update(spreadsheet=SP_URL, worksheet="stocks", data=updated)
         st.query_params.clear()
         st.rerun()
-    except:
-        st.query_params.clear()
+    except: st.query_params.clear()
 
-# 刪除筆記 (新增邏輯)
+# 刪除筆記邏輯
 if "delete_note_title" in query_params:
     try:
         dn_t = query_params["delete_note_title"]
         dn_d = query_params["delete_note_date"]
         n_tmp = conn.read(spreadsheet=SP_URL, worksheet="notes", ttl=0)
-        # 比對標題與日期確保刪除正確
         n_updated = n_tmp[~((n_tmp['title'] == dn_t) & (n_tmp['date'] == dn_d))]
         conn.update(spreadsheet=SP_URL, worksheet="notes", data=n_updated)
         st.query_params.clear()
         st.rerun()
-    except:
-        st.query_params.clear()
+    except: st.query_params.clear()
 
 # --- B. 讀取資料 ---
 @st.cache_data(ttl=5)
-def load_all_data_v4():
+def load_full_data_v5():
     try:
         s_raw = conn.read(spreadsheet=SP_URL, worksheet="stocks", ttl=0)
         n_raw = conn.read(spreadsheet=SP_URL, worksheet="notes", ttl=0)
@@ -65,25 +62,42 @@ def load_all_data_v4():
     except:
         return pd.DataFrame(columns=["group", "code", "name"]), pd.DataFrame(columns=["title", "tags", "content", "date"])
 
-stocks_df, notes_df = load_all_data_v4()
+stocks_df, notes_df = load_full_data_v5()
 
-# 頂部導覽
+# --- 1. 頂部標題與大盤數據 (補回這塊) ---
 st.title("🇹🇼 台股投資戰情室 3.0")
-if st.button("🔄 同步雲端數據"):
-    st.cache_data.clear()
-    st.rerun()
+
+try:
+    twii = yf.Ticker("^TWII")
+    t_h = twii.history(period="3d")
+    if not t_h.empty:
+        now_v = t_h.iloc[-1]['Close']
+        pre_v = t_h.iloc[-2]['Close']
+        diff, pct = now_v - pre_v, (now_v - pre_v)/pre_v * 100
+        icon = "🔴" if diff > 0 else "🟢"
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("加權指數", f"{now_v:,.0f}", f"{icon} {diff:+.2f} ({pct:+.2f}%)")
+        c2.metric("連線狀態", "✅ 正常", f"更新: {datetime.now().strftime('%H:%M')}")
+        with c3:
+            st.write("") # 調整按鈕垂直位置
+            if st.button("🔄 同步雲端數據", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+except:
+    st.info("大盤數據讀取中...")
 
 st.divider()
 
-# --- 3. 管理中心 ---
-with st.expander("⚙️ 管理中心 (個股/群組)", expanded=False):
-    st.info("可在下方直接新增個股，代碼會自動對接 Yahoo Finance。")
+# --- 2. 管理中心 (個股/群組) ---
+with st.expander("⚙️ 管理中心", expanded=False):
     with st.container(border=True):
+        st.markdown("#### 🚀 新增個股 / ETF")
         g_opts = list(stocks_df['group'].unique()) if not stocks_df.empty else []
         c1, c2, c3 = st.columns([2, 1, 1])
-        with c1: t_g = st.selectbox("目標群組", g_opts if g_opts else ["請先建立"], key="add_g")
-        with c2: i_c = st.text_input("代碼", key="add_c")
-        with c3: i_n = st.text_input("名稱", key="add_n")
+        with c1: t_g = st.selectbox("目標群組", g_opts if g_opts else ["請先建立"], key="box_g")
+        with c2: i_c = st.text_input("代碼", key="in_c_box")
+        with c3: i_n = st.text_input("名稱", key="in_n_box")
         if st.button("🌟 存入個股", use_container_width=True, type="primary"):
             if i_c and t_g != "請先建立":
                 clean = stocks_df[~((stocks_df['group'] == t_g) & (stocks_df['code'] == "9999"))]
@@ -92,7 +106,7 @@ with st.expander("⚙️ 管理中心 (個股/群組)", expanded=False):
                 st.cache_data.clear()
                 st.rerun()
 
-# --- 4. 個股清單 ---
+# --- 3. 個股清單 ---
 if not stocks_df.empty:
     for g in stocks_df['group'].unique():
         if pd.isna(g) or str(g).lower() == 'nan': continue
@@ -131,9 +145,9 @@ if not stocks_df.empty:
 
 st.divider()
 
-# --- 5. 雲端筆記區 ---
+# --- 4. 雲端筆記區 ---
 st.header("📝 雲端筆記")
-with st.form("note_form_final", clear_on_submit=True):
+with st.form("note_form_v5", clear_on_submit=True):
     n_t = st.text_input("主題")
     n_k = st.text_input("標籤")
     n_c = st.text_area("內容")
@@ -150,10 +164,10 @@ if not notes_df.empty:
             st.write(f"**標籤：** {n['tags']}")
             st.write(n['content'])
             
-            # 刪除筆記按鈕
-            n_del_params = urllib.parse.urlencode({"delete_note_title": n['title'], "delete_note_date": n['date']})
+            # 刪除按鈕
+            n_del_p = urllib.parse.urlencode({"delete_note_title": n['title'], "delete_note_date": n['date']})
             st.markdown(f"""
-                <div style="text-align: right;">
-                    <a href="./?{n_del_params}" target="_self" style="text-decoration: none; background-color: #ff4b4b; color: white; padding: 5px 10px; border-radius: 5px; font-size: 0.8rem;">🗑️ 刪除此筆記</a>
+                <div style="text-align: right; margin-top: 10px;">
+                    <a href="./?{n_del_p}" target="_self" style="text-decoration: none; background-color: #ff4b4b; color: white; padding: 5px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: bold;">🗑️ 刪除筆記</a>
                 </div>
             """, unsafe_allow_html=True)
