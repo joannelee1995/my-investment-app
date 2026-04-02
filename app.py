@@ -21,7 +21,7 @@ if 'stock_groups' not in st.session_state:
 if 'notes' not in st.session_state: 
     st.session_state.notes = []
 
-# --- 1. 置頂：大盤狀況 (強化情緒評語) ---
+# --- 1. 置頂：大盤狀況 ---
 st.title("🇹🇼 台股投資戰情室 3.0")
 try:
     twii = yf.Ticker("^TWII")
@@ -32,7 +32,7 @@ try:
         diff = now - prev
         pct = (diff / prev) * 100
         
-        # 判定市場情緒與力度
+        # 判定市場情緒與力度 (恢復你喜歡的明確評語)
         if pct >= 1.5: sentiment = "🔥 強勢噴發"
         elif 0.5 <= pct < 1.5: sentiment = "📈 溫和上漲"
         elif -0.5 < pct < 0.5: sentiment = "⚖️ 盤整震盪"
@@ -43,7 +43,7 @@ try:
         
         c1, c2, c3 = st.columns(3)
         c1.metric("加權指數", f"{now:,.2f}", f"{m_icon} {diff:+.2f} ({pct:+.2f}%)")
-        c2.metric("市場情緒", sentiment, f"力度指標: {m_icon}")
+        c2.metric("市場情緒", sentiment, f"趨勢力道: {m_icon}")
         c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
 except:
     st.write("大盤數據讀取中...")
@@ -83,5 +83,54 @@ with st.expander("⚙️ 管理群組與個股 (展開編輯)", expanded=True):
             st.session_state.stock_groups[target_g].append({"code": s_code, "name": final_name})
             st.rerun()
 
+# 顯示分組
 for group, stocks in st.session_state.stock_groups.items():
-    st.subheader(f"
+    st.subheader(f"📁 {group}")
+    if not stocks:
+        st.caption("尚無個股")
+        continue
+    
+    for item in stocks:
+        try:
+            code = item['code']
+            display_name = item['name']
+            t = yf.Ticker(f"{code}.TW")
+            h = t.history(period="2d")
+            if not h.empty:
+                cur = h['Close'].iloc[-1]
+                prev = h['Close'].iloc[0]
+                diff = cur - prev
+                pct = (diff / prev) * 100
+                p_mark = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
+                
+                sc1, sc2, sc3, sc4 = st.columns([2, 1.5, 2, 1])
+                sc1.write(f"**{code} {display_name}**")
+                sc2.write(f"價: {cur:.2f}")
+                sc3.write(f"{p_mark} {diff:+.2f} ({pct:+.2f}%)")
+                if sc4.button("❌", key=f"del_{group}_{code}"):
+                    st.session_state.stock_groups[group].remove(item)
+                    st.rerun()
+        except:
+            st.caption(f"{item.get('code', '個股')} 數據讀取中...")
+
+st.divider()
+
+# --- 4. 討論筆記紀錄 ---
+st.header("📝 討論筆記紀錄")
+with st.form("note_v6", clear_on_submit=True):
+    n1, n2 = st.columns(2)
+    nt = n1.text_input("本週主題")
+    nk = n2.text_input("標籤 (逗號隔開)")
+    nc = st.text_area("對話重點筆記")
+    if st.form_submit_button("儲存紀錄"):
+        if nt:
+            st.session_state.notes.append({"T": nt, "K": [k.strip() for k in nk.split(",")], "C": nc})
+            st.success("紀錄已儲存！")
+
+if st.session_state.notes:
+    all_k = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
+    sel = st.multiselect("💡 點選標籤過濾筆記內容", all_k)
+    for n in reversed(st.session_state.notes):
+        if not sel or any(tag in sel for tag in n["K"]):
+            with st.expander(f"📌 {n['T']} (標籤: {', '.join(n['K'])})"):
+                st.write(n['C'])
