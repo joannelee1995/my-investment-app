@@ -7,7 +7,7 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="台股永久戰情室 4.0", layout="wide")
 
 # 隱藏預設箭頭
-st.markdown("<style>[data-testid='stMetricDelta'] svg { display: none; }</style>", unsafe_allow_True=True)
+st.markdown("<style>[data-testid='stMetricDelta'] svg { display: none; }</style>", unsafe_allow_html=True)
 
 # 連接 Google Sheets (會自動抓 Secrets 的金鑰)
 SP_URL = "https://docs.google.com/spreadsheets/d/1pSVEg5J_-tg0wetPxNUVb9cU6kapUL_NIEV_Xz84PDM/edit?usp=sharing"
