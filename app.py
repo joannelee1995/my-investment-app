@@ -4,16 +4,21 @@ import yfinance as yf
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# 網頁基本設定
+# 網頁基本設定 (設定為 Wide 模式)
 st.set_page_config(page_title="台股投資戰情室", layout="wide")
 
-# 介面美化 CSS：強制手機版不要把欄位拆得太散
+# 介面美化 CSS (修正手機 columns 堆疊與 metric 顯示)
 st.markdown("""
 <style>
     [data-testid="stMetricDelta"] svg { display: none; }
-    .stMetric { background-color: #1e2129; padding: 10px; border-radius: 10px; }
+    
+    /* 核心修復：強制在手機上不要將 Columns 散開 */
     @media (max-width: 640px) {
-        .stock-row { font-size: 14px; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        div[data-testid="stBlock"] div[data-testid="column"] {
+            min-width: unset !important;
+            flex: 1 1 auto !important;
+            width: fit-content !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -39,14 +44,14 @@ def load_data_cached():
 stocks_df, notes_df = load_data_cached()
 
 # 頂部標題與同步按鈕
-c_t, c_s = st.columns([4, 1])
+c_t, c_s = st.columns([6, 1])
 with c_t: st.title("🇹🇼 台股投資戰情室 3.0")
 with c_s: 
     if st.button("🔄 同步"):
         st.cache_data.clear()
         st.rerun()
 
-# --- 2. 大盤與市場情緒 (修復版) ---
+# --- 2. 大盤與情緒 (修正為 Wide 排版) ---
 try:
     twii = yf.Ticker("^TWII")
     t_hist = twii.history(period="10d")
@@ -55,7 +60,6 @@ try:
         diff, pct = now['Close'] - prev['Close'], (now['Close'] - prev['Close']) / prev['Close'] * 100
         icon = "🔴" if diff > 0 else "🟢"
         
-        # 市場情緒邏輯：根據漲跌幅與量能判斷
         avg_vol = t_hist['Volume'].tail(5).mean()
         v_ratio = now['Volume'] / avg_vol
         if pct > 0.5 and v_ratio > 1.1: mood = "🔥 多方攻擊"
@@ -66,13 +70,13 @@ try:
         col1, col2, col3 = st.columns(3)
         col1.metric("加權指數", f"{now['Close']:,.0f}", f"{icon} {diff:+.2f} ({pct:+.2f}%)")
         col2.metric("市場情緒", mood, f"量能比: {v_ratio:.2f}x")
-        col3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
+        col3.metric("更新時間", datetime.now().strftime('%H:%M:%S'), "")
 except:
-    st.info("大盤數據讀取中...")
+    pass
 
 st.divider()
 
-# --- 3. 管理區 (保持摺疊避免佔空間) ---
+# --- 3. 管理區 (摺疊顯示) ---
 with st.expander("⚙️ 管理中心", expanded=False):
     m_col1, m_col2 = st.columns(2)
     with m_col1:
@@ -86,9 +90,10 @@ with st.expander("⚙️ 管理中心", expanded=False):
     with m_col2:
         target_g_del = st.selectbox("刪除群組", ["請選擇"] + list(stocks_df['group'].unique()))
         if st.button("確認刪除"):
-            conn.update(spreadsheet=SP_URL, worksheet="stocks", data=stocks_df[stocks_df['group'] != target_g_del])
-            st.cache_data.clear()
-            st.rerun()
+            if target_g_del != "請選擇":
+                conn.update(spreadsheet=SP_URL, worksheet="stocks", data=stocks_df[stocks_df['group'] != target_g_del])
+                st.cache_data.clear()
+                st.rerun()
     st.write("---")
     target_g = st.selectbox("目標群組", stocks_df['group'].unique())
     c_s1, c_s2 = st.columns(2)
@@ -101,11 +106,15 @@ with st.expander("⚙️ 管理中心", expanded=False):
             st.cache_data.clear()
             st.rerun()
 
-# --- 4. 個股清單 (手機排版優化版) ---
+# --- 4. 個股清單 (核心修復：使用 HTML/CSS 鎖定排版) ---
 if stocks_df is not None:
     for g in stocks_df['group'].unique():
         st.subheader(f"📁 {g}")
         sub = stocks_df[stocks_df['group'] == g]
+        
+        # 電腦版控制：使用大一點的 Columns 比例來包裝 HTML
+        # 手機版控制：在 st.markdown 裡面解決
+
         for _, row in sub.iterrows():
             t_c = str(row['code'])
             if t_c == "9999": continue
@@ -121,42 +130,47 @@ if stocks_df is not None:
                         color = "#ff4b4b" if d > 0 else "#00ff41" if d < 0 else "#ffffff"
                         m_icon = "▲" if d > 0 else "▼" if d < 0 else "─"
                         
-                        # --- 核心優化：整合卡片與微型刪除鍵 ---
-                        # 這裡把比例調成 20:1，讓刪除鍵變得很邊緣
-                        card_col, del_col = st.columns([20, 1]) 
-                        with card_col:
+                        # --- 終極優化：將資訊與刪除鍵「鎖在同一列 HTML」內 ---
+                        # 電腦版使用 st.columns 來防止卡片無限拉長
+                        info_col, del_col = st.columns([8, 1])
+                        
+                        with info_col:
+                            # 資訊卡片 HTML (代碼、名稱、現價、漲跌)
                             st.markdown(f"""
-                            <div style="display: flex; justify-content: space-between; align-items: center; background: #1e2129; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; border-left: 3px solid {color};">
-                                <div style="flex: 1.2;">
-                                    <div style="font-size: 0.7rem; color: #888; line-height: 1;">{t_c}</div>
-                                    <div style="font-size: 0.95rem; font-weight: 600;">{row['name']}</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; background: #262730; padding: 10px 15px; border-radius: 8px; margin-bottom: 2px; border-left: 4px solid {color}; border-right: 1px solid #444;">
+                                <div style="flex: 2;">
+                                    <div style="font-size: 0.8rem; color: #888; line-height: 1;">{t_c}</div>
+                                    <div style="font-size: 1.05rem; font-weight: 700;">{row['name']}</div>
                                 </div>
-                                <div style="flex: 1; text-align: center; font-size: 1.05rem; font-weight: 700;">{cp:.2f}</div>
-                                <div style="flex: 1.2; text-align: right; color: {color}; font-size: 0.85rem; line-height: 1.1;">
-                                    <b>{m_icon} {abs(d):.2f}</b><br><span style="font-size: 0.75rem;">({p:+.2f}%)</span>
+                                <div style="flex: 1.5; text-align: center; font-size: 1.15rem; font-weight: 800;">{cp:.2f}</div>
+                                <div style="flex: 1.5; text-align: right; color: {color}; font-size: 0.9rem;">
+                                    <b>{m_icon} {abs(d):.2f}</b><br><small>({p:+.2f}%)</small>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
                         with del_col:
-                            # 移除紅色背景，改用透明的小叉叉
-                            if st.button("×", key=f"del_{g}_{t_c}", help="移除"):
+                            # 變成半透明的小文字按鈕，緊貼在卡片右邊，但跟它鎖在同一列
+                            # 我們強制給予 padding 防止手機版自動偏移
+                            st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True) 
+                            if st.button("×", key=f"del_{g}_{t_c}", help="移除此股"):
                                 conn.update(spreadsheet=SP_URL, worksheet="stocks", data=stocks_df[~((stocks_df['group'] == g) & (stocks_df['code'] == t_c))])
                                 st.cache_data.clear()
                                 st.rerun()
                         success = True
                         break
             except:
-                continue
+                st.caption(f"{t_c} 載入中...")
 
 st.divider()
 st.header("📝 雲端筆記")
-with st.form("note_v5", clear_on_submit=True):
+with st.form("note_persistent", clear_on_submit=True):
     n_t, n_k = st.text_input("主題"), st.text_input("標籤")
     n_c = st.text_area("內容")
     if st.form_submit_button("儲存筆記"):
         if n_t:
             new_n = pd.DataFrame([{"title": n_t, "tags": n_k, "content": n_c, "date": datetime.now().strftime("%Y-%m-%d")}])
-            conn.update(spreadsheet=SP_URL, worksheet="notes", data=pd.concat([notes_df, new_n]))
+            updated = pd.concat([notes_df, new_n], ignore_index=True)
+            conn.update(spreadsheet=SP_URL, worksheet="notes", data=updated)
             st.cache_data.clear()
             st.rerun()
 
