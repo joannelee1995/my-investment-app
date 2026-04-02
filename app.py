@@ -5,14 +5,6 @@ import yfinance as yf
 
 st.set_page_config(page_title="台股投資戰情室", layout="wide")
 
-# 自定義 CSS 讓表格顏色更明顯
-st.markdown("""
-    <style>
-    .red-text { color: #eb4034; font-weight: bold; }
-    .green-text { color: #1f822d; font-weight: bold; }
-    </style>
-    """, unsafe_content_code=True)
-
 if 'notes' not in st.session_state: st.session_state.notes = []
 if 'watchlist' not in st.session_state: st.session_state.watchlist = ["2330", "0050"]
 if 'portfolio' not in st.session_state: st.session_state.portfolio = []
@@ -20,7 +12,7 @@ if 'portfolio' not in st.session_state: st.session_state.portfolio = []
 # --- 置頂：大盤狀況 ---
 st.title("🇹🇼 台股投資戰情室")
 try:
-    twii = yf.Ticker("^TWII") # 加權指數代碼
+    twii = yf.Ticker("^TWII")
     hist = twii.history(period="2d")
     now_price = hist['Close'].iloc[-1]
     last_price = hist['Close'].iloc[0]
@@ -28,13 +20,15 @@ try:
     pct = (change / last_price) * 100
     
     col1, col2, col3 = st.columns(3)
-    col1.metric("台股加權指數", f"{now_price:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+    # 用紅綠顏色標示大盤
+    delta_color = "normal" if change >= 0 else "inverse"
+    col1.metric("台股加權指數", f"{now_price:,.2f}", f"{change:+.2f} ({pct:+.2f}%)", delta_color=delta_color)
 except:
     st.write("目前無法取得大盤即時數據")
 
 st.divider()
 
-# --- 第一部分：即時個股追蹤 (顏色優化) ---
+# --- 第一部分：即時個股追蹤 ---
 st.header("📈 自選股監控")
 new_stock = st.text_input("輸入台股代碼 (直接輸入數字，如: 0056)")
 if st.button("加入自選"):
@@ -42,7 +36,6 @@ if st.button("加入自選"):
         st.session_state.watchlist.append(new_stock)
 
 if st.session_state.watchlist:
-    # 建立表格呈現
     rows = []
     for code in st.session_state.watchlist:
         try:
@@ -53,19 +46,16 @@ if st.session_state.watchlist:
             prev = h['Close'].iloc[0]
             diff = cur - prev
             diff_p = (diff / prev) * 100
-            
-            # 根據漲跌決定顏色符號
-            color = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
+            color = "🔴漲" if diff > 0 else "🟢跌" if diff < 0 else "⚪平"
             rows.append({
                 "代碼": code,
-                "現價": f"{cur:.2f}",
-                "漲跌": f"{diff:+.2f}",
+                "現價": round(cur, 2),
+                "漲跌": round(diff, 2),
                 "漲跌幅": f"{diff_p:+.2f}%",
                 "趨勢": color
             })
         except: continue
-    
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.table(pd.DataFrame(rows))
 
 st.divider()
 
@@ -77,10 +67,12 @@ with st.form("note_form", clear_on_submit=True):
     tags = c2.text_input("關鍵字 (逗號隔開)")
     content = st.text_area("筆記內容")
     if st.form_submit_button("儲存"):
-        st.session_state.notes.append({"T": topic, "K": [k.strip() for k in tags.split(",")], "C": content})
+        if topic:
+            st.session_state.notes.append({"T": topic, "K": [k.strip() for k in tags.split(",")], "C": content})
+            st.success("儲存成功！")
 
 if st.session_state.notes:
-    all_k = list(set([k for n in st.session_state.notes for k in n["K"]]))
+    all_k = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
     sel = st.multiselect("篩選關鍵字", all_k)
     for n in reversed(st.session_state.notes):
         if not sel or any(k in sel for k in n["K"]):
@@ -92,8 +84,19 @@ st.divider()
 # --- 第三部分：資產配置 ---
 st.header("💰 我的資產分佈")
 with st.expander("新增持有紀錄"):
-    with st.form("p_form"):
+    with st.form("p_form", clear_on_submit=True):
         p1, p2, p3 = st.columns(3)
         name = p1.text_input("名稱 (如: 0050)")
-        cost = p2.number_input("總投入成本 (萬)", min_value=0.0)
-        cat = p3.selectbox("
+        cost = p2.number_input("總投入成本 (萬)", min_value=0.0, step=0.1)
+        cat = p3.selectbox("分類", ["電子", "金融", "傳產", "ETF", "現金"])
+        if st.form_submit_button("確認加入"):
+            if name:
+                st.session_state.portfolio.append({"N": name, "V": cost, "C": cat})
+                st.rerun()
+
+if st.session_state.portfolio:
+    df = pd.DataFrame(st.session_state.portfolio)
+    fig = px.pie(df, values='V', names='C', title="資產類型比例", color_discrete_sequence=px.colors.qualitative.Set3)
+    st.plotly_chart(fig, use_container_width=True)
+    st.write("詳細項目明細：")
+    st.dataframe(df.rename(columns={"N":"名稱", "V":"成本(萬)", "C":"分類"}), use_container_width=True)
