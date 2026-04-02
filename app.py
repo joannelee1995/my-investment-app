@@ -5,30 +5,18 @@ from datetime import datetime
 
 st.set_page_config(page_title="台股投資戰情室 3.0", layout="wide")
 
-# --- 超強效 CSS：強制紅漲綠跌 ---
-st.markdown("""
-    <style>
-    /* 強制 Metric 數字顏色 */
-    [data-testid="stMetricValue"] { color: white !important; }
-    /* 這裡透過選取器強制覆寫：Streamlit 認為的 'normal' (通常是綠) 改成紅 */
-    [data-testid="stMetricDelta"] > div { color: #FF0000 !important; } /* 漲紅 */
-    [data-testid="stMetricDelta"] svg { fill: #FF0000 !important; }
-    /* 如果是負數 (跌)，我們在程式碼中會標註為 'inverse'，這裡再強制轉綠 */
-    [data-testid="stMetricDelta"][data-delta-color="inverse"] > div { color: #008000 !important; } /* 跌綠 */
-    [data-testid="stMetricDelta"][data-delta-color="inverse"] svg { fill: #008000 !important; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 常用個股中文名稱對照表 (解決 API 讀不到中文的問題)
+# 常用個股中文名稱對照表
 STOCK_NAMES = {
     "2330": "台積電", "2454": "聯發科", "2317": "鴻海", 
     "0050": "元大台灣50", "0056": "元大高股息", "00878": "國泰永續高股息",
-    "2881": "富邦金", "2882": "國泰金", "2603": "長榮"
+    "2881": "富邦金", "2882": "國泰金", "2603": "長榮", "2609": "陽明"
 }
 
+# 初始化資料儲存
 if 'stock_groups' not in st.session_state:
     st.session_state.stock_groups = {"電子": ["2330"], "金融": ["2881"], "ETF": ["0050"]}
-if 'notes' not in st.session_state: st.session_state.notes = []
+if 'notes' not in st.session_state: 
+    st.session_state.notes = []
 
 # --- 1. 置頂：大盤狀況 ---
 st.title("🇹🇼 台股投資戰情室 3.0")
@@ -42,70 +30,92 @@ try:
         pct = (diff / prev) * 100
         
         c1, c2, c3 = st.columns(3)
-        # 關鍵：如果是正數用 'normal' (CSS已轉紅)，負數用 'inverse' (CSS已轉綠)
-        d_mode = "normal" if diff >= 0 else "inverse"
-        c1.metric("加權指數", f"{now:,.2f}", f"{diff:+.2f} ({pct:+.2f}%)", delta_color=d_mode)
-        
-        status_text = "📈 強勢上漲" if diff > 0 else "📉 市場跌勢"
-        status_icon = "🔴" if diff > 0 else "🟢"
-        c2.metric("市場情緒", status_text, f"盤態: {status_icon}")
-        c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "Yahoo Finance")
+        # 用符號代替顏色，解決系統配色問題
+        m_icon = "🔴" if diff > 0 else "🟢"
+        c1.metric("加權指數", f"{now:,.2f}", f"{m_icon} {diff:+.2f} ({pct:+.2f}%)")
+        c2.metric("市場情緒", "強勢" if diff > 0 else "回檔", f"趨勢: {m_icon}")
+        c3.write(f"**最後更新：** {datetime.now().strftime('%H:%M:%S')}")
 except:
     st.write("大盤數據讀取中...")
 
 st.divider()
 
-# --- 2. 財經焦點 (改為摘要模式) ---
+# --- 2. 財經焦點摘要 ---
 st.header("📰 今日財經焦點摘要")
-try:
-    news_data = twii.news[:3]
-    if news_data:
-        for item in news_data:
-            st.markdown(f"**• {item['title']}**")
-    else:
-        st.write("• 今日大盤回檔幅度較大，注意電子權值股走勢。")
-        st.write("• 成交量能變化為短線觀察重點。")
-        st.write("• 建議關注與爸爸討論過的長期價值標的。")
-except:
-    st.write("今日盤勢整理中...")
+st.markdown("""
+- **大盤走勢：** 今日權值股表現為觀察重點，留意加權指數支撐點位。
+- **量能觀察：** 成交量是否放量將決定短線反彈力道。
+- **產業焦點：** 半導體與高股息 ETF 交易依舊活絡。
+""")
 
 st.divider()
 
-# --- 3. 自選股群組管理 ---
+# --- 3. 自選股群組管理 (功能全數回歸) ---
 st.header("🗂️ 自選股群組管理")
-with st.expander("⚙️ 管理群組與個股"):
-    # (保留原本的新增邏輯)
-    pass 
 
+with st.expander("⚙️ 管理群組與個股 (展開以編輯)", expanded=True):
+    g1, g2 = st.columns(2)
+    new_g = g1.text_input("1. 建立新分類 (例如: 航運)")
+    if g1.button("新增分類"):
+        if new_g and new_g not in st.session_state.stock_groups:
+            st.session_state.stock_groups[new_g] = []
+            st.rerun()
+    
+    target_g = g2.selectbox("2. 選擇分類", list(st.session_state.stock_groups.keys()))
+    s_code = g2.text_input("3. 輸入台股代碼 (數字)")
+    if g2.button("加入此分類"):
+        if s_code and s_code not in st.session_state.stock_groups[target_g]:
+            st.session_state.stock_groups[target_g].append(s_code)
+            st.rerun()
+
+# 顯示分組與個股
 for group, stocks in st.session_state.stock_groups.items():
-    if stocks:
-        st.subheader(f"📁 {group}")
-        for code in stocks:
-            try:
-                t = yf.Ticker(f"{code}.TW")
-                h = t.history(period="2d")
-                if not h.empty:
-                    cur = h['Close'].iloc[-1]
-                    prev = h['Close'].iloc[-0]
-                    diff = cur - prev
-                    pct = (diff / prev) * 100
-                    # 台灣配色：紅漲綠跌
-                    mark = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
-                    
-                    # 優先從對照表抓名稱
-                    name = STOCK_NAMES.get(code, "台股")
-                    
-                    sc1, sc2, sc3, sc4 = st.columns([2, 1.5, 2, 1])
-                    sc1.write(f"**{code} {name}**")
-                    sc2.write(f"價: {cur:.2f}")
-                    sc3.write(f"{mark} {diff:+.2f} ({pct:+.2f}%)")
-                    if sc4.button("❌", key=f"del_{group}_{code}"):
-                        st.session_state.stock_groups[group].remove(code)
-                        st.rerun()
-            except: continue
+    st.subheader(f"📁 {group}")
+    if not stocks:
+        st.caption("此分類目前尚無個股。")
+        continue
+    
+    for code in stocks:
+        try:
+            t = yf.Ticker(f"{code}.TW")
+            h = t.history(period="2d")
+            if not h.empty:
+                cur = h['Close'].iloc[-1]
+                prev = h['Close'].iloc[0]
+                diff = cur - prev
+                pct = (diff / prev) * 100
+                # 採用色塊符號方案
+                p_mark = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
+                name = STOCK_NAMES.get(code, "台股")
+                
+                sc1, sc2, sc3, sc4 = st.columns([2, 1.5, 2, 1])
+                sc1.write(f"**{code} {name}**")
+                sc2.write(f"價: {cur:.2f}")
+                sc3.write(f"{p_mark} {diff:+.2f} ({pct:+.2f}%)")
+                if sc4.button("❌", key=f"del_{group}_{code}"):
+                    st.session_state.stock_groups[group].remove(code)
+                    st.rerun()
+        except:
+            st.caption(f"{code} 數據讀取失敗")
 
 st.divider()
 
-# --- 4. 討論筆記 (保留) ---
+# --- 4. 討論筆記紀錄 ---
 st.header("📝 討論筆記紀錄")
-# (保留原本的筆記邏輯)
+with st.form("note_form_v5", clear_on_submit=True):
+    n1, n2 = st.columns(2)
+    nt = n1.text_input("討論主題")
+    nk = n2.text_input("標籤 (以逗號隔開)")
+    nc = st.text_area("詳細討論筆記內容")
+    if st.form_submit_button("儲存紀錄"):
+        if nt:
+            st.session_state.notes.append({"T": nt, "K": [k.strip() for k in nk.split(",")], "C": nc})
+            st.success("儲存成功！")
+
+if st.session_state.notes:
+    all_k = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
+    sel = st.multiselect("💡 點選標籤過濾議題", all_k)
+    for n in reversed(st.session_state.notes):
+        if not sel or any(tag in sel for tag in n["K"]):
+            with st.expander(f"📌 {n['T']} ({', '.join(n['K'])})"):
+                st.write(n['C'])
