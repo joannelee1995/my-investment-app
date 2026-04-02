@@ -28,23 +28,31 @@ if "delete_code" in query_params:
     except:
         st.query_params.clear()
 
-# --- B. 讀取資料 ---
+# --- B. 讀取資料 (雙分頁讀取) ---
 @st.cache_data(ttl=5)
-def load_and_clean_final():
+def load_all_data_final():
     try:
+        # 讀取股票
         s_raw = conn.read(spreadsheet=SP_URL, worksheet="stocks", ttl=0)
-        n_raw = conn.read(spreadsheet=SP_URL, worksheet="notes", ttl=0)
         if s_raw is not None and not s_raw.empty:
-            df = s_raw.copy()
-            df['code'] = df['code'].astype(str).str.replace(".0", "", regex=False).str.strip()
-            df = df[~df['code'].isin(['nan', 'NaN', 'None', '', '9999'])]
+            s_df = s_raw.copy()
+            s_df['code'] = s_df['code'].astype(str).str.replace(".0", "", regex=False).str.strip()
+            s_df = s_df[~s_df['code'].isin(['nan', 'NaN', 'None', '', '9999'])]
         else:
-            df = pd.DataFrame(columns=["group", "code", "name"])
-        return df, n_raw if n_raw is not None else pd.DataFrame()
+            s_df = pd.DataFrame(columns=["group", "code", "name"])
+            
+        # 讀取筆記
+        n_raw = conn.read(spreadsheet=SP_URL, worksheet="notes", ttl=0)
+        if n_raw is not None and not n_raw.empty:
+            n_df = n_raw.dropna(subset=['title']).copy()
+        else:
+            n_df = pd.DataFrame(columns=["title", "tags", "content", "date"])
+            
+        return s_df, n_df
     except:
-        return pd.DataFrame(columns=["group", "code", "name"]), pd.DataFrame()
+        return pd.DataFrame(columns=["group", "code", "name"]), pd.DataFrame(columns=["title", "tags", "content", "date"])
 
-stocks_df, notes_df = load_and_clean_final()
+stocks_df, notes_df = load_all_data_final()
 
 # 頂部導覽
 c_t, c_s = st.columns([5, 1])
@@ -66,17 +74,30 @@ try:
         c1, c2, c3 = st.columns(3)
         c1.metric("加權指數", f"{now_v:,.0f}", f"{icon} {diff:+.2f} ({pct:+.2f}%)")
         c2.metric("連線狀態", "✅ 正常", "")
-        c3.metric("更新時間", datetime.now().strftime('%H:%M:%S'), "")
+        c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
 except:
     pass
 
 st.divider()
 
-# --- 3. 管理中心 (省略, 維持之前美化版代碼即可) ---
+# --- 3. 管理中心 (摺疊區) ---
 with st.expander("⚙️ 管理中心", expanded=False):
-    st.info("可在此新增或刪除自選股與群組")
+    with st.container(border=True):
+        st.markdown("#### 🚀 新增個股 / ETF")
+        g_opts = list(stocks_df['group'].unique()) if not stocks_df.empty else []
+        c1, c2, c3 = st.columns([2, 1, 1])
+        with c1: t_g = st.selectbox("目標群組", g_opts if g_opts else ["請先建立"], key="add_g")
+        with c2: i_c = st.text_input("代碼", key="add_c")
+        with c3: i_n = st.text_input("名稱", key="add_n")
+        if st.button("🌟 存入雲端", use_container_width=True, type="primary"):
+            if i_c and t_g != "請先建立":
+                clean = stocks_df[~((stocks_df['group'] == t_g) & (stocks_df['code'] == "9999"))]
+                new_row = pd.DataFrame([{"group": t_g, "code": str(i_c).strip(), "name": i_n}])
+                conn.update(spreadsheet=SP_URL, worksheet="stocks", data=pd.concat([clean, new_row]))
+                st.cache_data.clear()
+                st.rerun()
 
-# --- 4. 個股清單 (防 nan 核心修復版) ---
+# --- 4. 個股清單 (防 nan 渲染) ---
 if not stocks_df.empty:
     for g in stocks_df['group'].unique():
         if pd.isna(g) or str(g).lower() == 'nan': continue
@@ -87,38 +108,23 @@ if not stocks_df.empty:
             for _, row in sub.iterrows():
                 t_c = str(row['code']).strip()
                 if t_c in ["9999", "nan", "None", ""]: continue
-                
                 try:
-                    success = False
                     d_code = t_c.zfill(4) if (t_c.isdigit() and len(t_c) < 4) else t_c
-                    
+                    success = False
                     for suffix in [".TW", ".TWO"]:
                         tk = yf.Ticker(f"{d_code}{suffix}")
-                        # 先試 history，不行就試 fast_info
                         h = tk.history(period="2d")
+                        cp = h.iloc[-1]['Close'] if not h.empty and not pd.isna(h.iloc[-1]['Close']) else tk.fast_info.get('lastPrice', 0)
+                        pp = h.iloc[0]['Close'] if not h.empty and not pd.isna(h.iloc[0]['Close']) else tk.fast_info.get('previousClose', cp)
                         
-                        cp = 0.0
-                        if not h.empty and not pd.isna(h.iloc[-1]['Close']):
-                            cp = h.iloc[-1]['Close']
-                            pp = h.iloc[0]['Close']
-                        else:
-                            # 備援：嘗試抓取最後成交價
-                            cp = tk.fast_info.get('lastPrice', 0)
-                            pp = tk.fast_info.get('previousClose', cp)
-                        
-                        # 只有在價格大於 0 且不是 nan 的情況下才顯示
                         if cp > 0 and not pd.isna(cp):
                             d, p = cp - pp, ((cp - pp)/pp)*100 if pp != 0 else 0
                             color = "#ff4b4b" if d > 0 else "#00ff41" if d < 0 else "#ffffff"
                             m_i = "▲" if d > 0 else "▼" if d < 0 else "─"
                             params = urllib.parse.urlencode({"delete_code": t_c, "delete_group": g})
-                            
                             st.markdown(f"""
                             <div style="display: flex; justify-content: space-between; align-items: center; background: #262730; padding: 10px 15px; border-radius: 8px; margin-bottom: 4px; border-left: 4px solid {color};">
-                                <div style="flex: 2;">
-                                    <div style="font-size: 0.75rem; color: #888;">{d_code}</div>
-                                    <div style="font-size: 1rem; font-weight: bold;">{row['name']}</div>
-                                </div>
+                                <div style="flex: 2;"><div style="font-size: 0.75rem; color: #888;">{d_code}</div><div style="font-size: 1rem; font-weight: bold;">{row['name']}</div></div>
                                 <div style="flex: 1.2; text-align: center; font-size: 1.15rem; font-weight: 800;">{cp:.2f}</div>
                                 <div style="flex: 1.8; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 12px;">
                                     <div style="color: {color}; font-size: 0.85rem;"><b>{m_i} {abs(d):.2f}</b><br><small>({p:+.2f}%)</small></div>
@@ -127,15 +133,27 @@ if not stocks_df.empty:
                             </div>
                             """, unsafe_allow_html=True)
                             success = True; break
-                    
-                    if not success:
-                        st.markdown(f"""
-                        <div style="background: #1a1c22; padding: 10px; border-radius: 8px; margin-bottom: 4px; color: #555; font-size: 0.9rem;">
-                            ⏳ {d_code} {row['name']} 資料結算中...
-                        </div>
-                        """, unsafe_allow_html=True)
-                except:
-                    continue
+                    if not success: st.caption(f"⏳ {d_code} {row['name']} 結算中...")
+                except: continue
 
 st.divider()
-# --- 5. 筆記區 (維持邏輯) ---
+
+# --- 5. 雲端筆記區 (補回消失的部分) ---
+st.header("📝 雲端筆記")
+with st.form("note_form_v_final", clear_on_submit=True):
+    n_t = st.text_input("主題")
+    n_k = st.text_input("標籤")
+    n_c = st.text_area("內容")
+    if st.form_submit_button("💾 儲存筆記"):
+        if n_t:
+            new_n = pd.DataFrame([{"title": n_t, "tags": n_k, "content": n_c, "date": datetime.now().strftime("%Y-%m-%d")}])
+            updated_n = pd.concat([notes_df, new_n], ignore_index=True)
+            conn.update(spreadsheet=SP_URL, worksheet="notes", data=updated_n)
+            st.cache_data.clear()
+            st.rerun()
+
+if not notes_df.empty:
+    for _, n in notes_df.iloc[::-1].iterrows():
+        with st.expander(f"📌 {n['title']} ({n['date']})"):
+            st.write(f"**標籤：** {n['tags']}")
+            st.write(n['content'])
