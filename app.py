@@ -8,7 +8,7 @@ import urllib.parse
 # ==========================================
 # 1. 網頁基本設定與 CSS 美化
 # ==========================================
-st.set_page_config(page_title="台股投資戰情室 3.0", layout="wide")
+st.set_page_config(page_title="台股投資戰情室", layout="wide")
 
 st.markdown("""
 <style>
