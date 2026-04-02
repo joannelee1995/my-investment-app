@@ -130,4 +130,18 @@ for g in stocks_df['group'].unique():
 
 st.divider()
 st.header("📝 雲端筆記")
-# (筆記區邏輯維持不變...)
+with st.form("note_v4", clear_on_submit=True):
+    n_t, n_k = st.text_input("主題"), st.text_input("標籤")
+    n_c = st.text_area("討論內容")
+    if st.form_submit_button("儲存筆記"):
+        if n_t:
+            new_n = pd.DataFrame([{"title": n_t, "tags": n_k, "content": n_c, "date": datetime.now().strftime("%Y-%m-%d")}])
+            updated = pd.concat([notes_df, new_n], ignore_index=True)
+            conn.update(spreadsheet=SP_URL, worksheet="notes", data=updated)
+            st.cache_data.clear()
+            st.rerun()
+
+if not notes_df.empty:
+    for _, n in notes_df.iloc[::-1].iterrows():
+        with st.expander(f"📌 {n['title']} ({n['date']})"):
+            st.write(n['content'])
