@@ -3,17 +3,14 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-st.set_page_config(page_title="台股投資戰情室 3.0", layout="wide")
+# 基本網頁設定
+st.set_page_config(page_title="台股投資戰情室", layout="wide")
 
-# 強制隱藏系統預設箭頭
-st.markdown("""
-    <style>
-    [data-testid="stMetricDelta"] svg { display: none; }
-    </style>
-    """, unsafe_allow_html=True)
+# 隱藏預設箭頭
+st.markdown("<style>[data-testid='stMetricDelta'] svg { display: none; }</style>", unsafe_allow_html=True)
 
-# 內建常用名稱對照
-STOCK_NAMES = {"2330": "台積電", "2454": "聯發科", "0050": "元大台灣50", "0056": "元大高股息", "00878": "國泰永續高股息"}
+# 備用對照表
+STOCK_NAMES = {"2330": "台積電", "2454": "聯發科", "0050": "元大台灣50", "0056": "元大高股息"}
 
 # 初始化資料
 if 'stock_groups' not in st.session_state:
@@ -21,7 +18,7 @@ if 'stock_groups' not in st.session_state:
 if 'notes' not in st.session_state: 
     st.session_state.notes = []
 
-# --- 1. 置頂：大盤狀況 ---
+# --- 1. 大盤區 ---
 st.title("🇹🇼 台股投資戰情室 3.0")
 try:
     twii = yf.Ticker("^TWII")
@@ -32,56 +29,96 @@ try:
         diff = now - prev
         pct = (diff / prev) * 100
         
-        # 判定市場情緒 (客觀描述)
-        if pct >= 1.0: sentiment = "📈 強勢"
-        elif 0.2 <= pct < 1.0: sentiment = "↗️ 上漲"
-        elif -0.2 < pct < 0.2: sentiment = "⚖️ 平盤震盪"
-        elif -1.0 < pct <= -0.2: sentiment = "↘️ 回檔"
-        else: sentiment = "📉 跌幅較大"
+        # 情緒判定
+        if pct >= 1.0: stm = "📈 強勢"
+        elif 0.2 <= pct < 1.0: stm = "↗️ 上漲"
+        elif -0.2 < pct < 0.2: stm = "⚖️ 平盤"
+        elif -1.0 < pct <= -0.2: stm = "↘️ 回檔"
+        else: stm = "📉 跌幅較大"
         
-        m_icon = "🔴" if diff > 0 else "🟢"
-        
+        icon = "🔴" if diff > 0 else "🟢"
         c1, c2, c3 = st.columns(3)
-        c1.metric("加權指數", f"{now:,.2f}", f"{m_icon} {diff:+.2f} ({pct:+.2f}%)")
-        c2.metric("當前盤勢", sentiment, f"趨勢標示: {m_icon}")
+        c1.metric("加權指數", f"{now:,.2f}", f"{icon} {diff:+.2f} ({pct:+.2f}%)")
+        c2.metric("當前盤勢", stm, f"趨勢: {icon}")
         c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
 except:
-    st.write("大盤數據讀取中...")
+    st.write("大盤讀取中...")
 
 st.divider()
 
 # --- 2. 財經焦點摘要 ---
 st.header("📰 今日財經焦點摘要")
-st.markdown("""
-- **大盤走勢：** 今日權值股表現為觀察重點，留意加權指數支撐點位。
-- **量能觀察：** 成交量是否放量將決定短線反彈力道。
-- **產業焦點：** 半導體與高股息 ETF 交易依舊活絡。
-""")
+st.info("💡 今日重點：權值股走勢、成交量能變化、產業題材動向。")
 
 st.divider()
 
-# --- 3. 自選股群組管理 ---
+# --- 3. 自選股管理 ---
 st.header("🗂️ 自選股群組管理")
-
-with st.expander("⚙️ 管理群組與個股 (點此編輯)", expanded=True):
-    g1, g2 = st.columns(2)
-    new_g = g1.text_input("1. 建立新分類")
-    if g1.button("新增分類"):
+with st.expander("⚙️ 點此新增分類或個股", expanded=True):
+    col_g1, col_g2 = st.columns(2)
+    new_g = col_g1.text_input("建立新分類")
+    if col_g1.button("新增分類"):
         if new_g and new_g not in st.session_state.stock_groups:
             st.session_state.stock_groups[new_g] = []
             st.rerun()
     
     st.write("---")
-    target_g = st.selectbox("2. 選擇分類", list(st.session_state.stock_groups.keys()))
-    c_col1, c_col2 = st.columns(2)
-    s_code = c_col1.text_input("3. 代碼")
-    s_name = c_col2.text_input("4. 名稱 (選填)")
-    
-    if st.button("確認加入"):
-        if s_code:
-            final_name = s_name if s_name else STOCK_NAMES.get(s_code, "台股")
-            st.session_state.stock_groups[target_g].append({"code": s_code, "name": final_name})
+    target = st.selectbox("選擇分類", list(st.session_state.stock_groups.keys()))
+    c_id = st.text_input("股票代碼")
+    c_nm = st.text_input("股票名稱 (選填)")
+    if st.button("確認加入個股"):
+        if c_id:
+            nm = c_nm if c_nm else STOCK_NAMES.get(c_id, "台股")
+            st.session_state.stock_groups[target].append({"code": c_id, "name": nm})
             st.rerun()
 
-# 顯示分組
-for
+# 顯示個股清單
+for group_name, stock_list in st.session_state.stock_groups.items():
+    st.subheader(f"📁 {group_name}")
+    if not stock_list:
+        st.caption("尚無資料")
+        continue
+    
+    for item in stock_list:
+        try:
+            t_code = item['code']
+            t_name = item['name']
+            ticker = yf.Ticker(f"{t_code}.TW")
+            h = ticker.history(period="2d")
+            if not h.empty:
+                c_price = h.iloc[-1]['Close']
+                p_price = h.iloc[0]['Close']
+                d = c_price - p_price
+                p = (d / p_price) * 100
+                m = "🔴" if d > 0 else "🟢" if d < 0 else "⚪"
+                
+                sc1, sc2, sc3, sc4 = st.columns([2, 1.5, 2, 1])
+                sc1.write(f"**{t_code} {t_name}**")
+                sc2.write(f"價: {c_price:.2f}")
+                sc3.write(f"{m} {d:+.2f} ({p:+.2f}%)")
+                if sc4.button("❌", key=f"del_{group_name}_{t_code}"):
+                    st.session_state.stock_groups[group_name].remove(item)
+                    st.rerun()
+        except:
+            st.write(f"⚠️ {item.get('code')} 讀取中")
+
+st.divider()
+
+# --- 4. 討論筆記 ---
+st.header("📝 討論筆記紀錄")
+with st.form("note_form_vfinal", clear_on_submit=True):
+    n_t = st.text_input("議題主題")
+    n_k = st.text_input("標籤")
+    n_c = st.text_area("討論筆記")
+    if st.form_submit_button("儲存"):
+        if n_t:
+            st.session_state.notes.append({"T": n_t, "K": [k.strip() for k in n_k.split(",")], "C": n_c})
+            st.success("儲存成功")
+
+if st.session_state.notes:
+    tags = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
+    sel_tag = st.multiselect("💡 標籤過濾", tags)
+    for n in reversed(st.session_state.notes):
+        if not sel_tag or any(t in sel_tag for t in n["K"]):
+            with st.expander(f"📌 {n['T']}"):
+                st.write(n['C'])
