@@ -12,7 +12,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 內建常用名稱對照 (作為備援)
+# 內建常用名稱對照
 STOCK_NAMES = {"2330": "台積電", "2454": "聯發科", "0050": "元大台灣50", "0056": "元大高股息", "00878": "國泰永續高股息"}
 
 # 初始化資料
@@ -21,7 +21,7 @@ if 'stock_groups' not in st.session_state:
 if 'notes' not in st.session_state: 
     st.session_state.notes = []
 
-# --- 1. 置頂：大盤狀況 ---
+# --- 1. 置頂：大盤狀況 (強化情緒評語) ---
 st.title("🇹🇼 台股投資戰情室 3.0")
 try:
     twii = yf.Ticker("^TWII")
@@ -32,18 +32,25 @@ try:
         diff = now - prev
         pct = (diff / prev) * 100
         
-        c1, c2, c3 = st.columns(3)
-        # 用圓點取代箭頭
+        # 判定市場情緒與力度
+        if pct >= 1.5: sentiment = "🔥 強勢噴發"
+        elif 0.5 <= pct < 1.5: sentiment = "📈 溫和上漲"
+        elif -0.5 < pct < 0.5: sentiment = "⚖️ 盤整震盪"
+        elif -1.5 < pct <= -0.5: sentiment = "📉 震盪回檔"
+        else: sentiment = "😨 恐慌殺盤"
+        
         m_icon = "🔴" if diff > 0 else "🟢"
+        
+        c1, c2, c3 = st.columns(3)
         c1.metric("加權指數", f"{now:,.2f}", f"{m_icon} {diff:+.2f} ({pct:+.2f}%)")
-        c2.metric("市場情緒", "強勢" if diff > 0 else "回檔", f"狀態: {m_icon}")
+        c2.metric("市場情緒", sentiment, f"力度指標: {m_icon}")
         c3.metric("最後更新", datetime.now().strftime('%H:%M:%S'), "")
 except:
     st.write("大盤數據讀取中...")
 
 st.divider()
 
-# --- 2. 財經焦點摘要 (保持不變) ---
+# --- 2. 財經焦點摘要 ---
 st.header("📰 今日財經焦點摘要")
 st.markdown("""
 - **大盤走勢：** 今日權值股表現為觀察重點，留意加權指數支撐點位。
@@ -53,78 +60,28 @@ st.markdown("""
 
 st.divider()
 
-# --- 3. 自選股群組管理 (新增自定義名稱功能) ---
+# --- 3. 自選股群組管理 ---
 st.header("🗂️ 自選股群組管理")
 
-with st.expander("⚙️ 管理群組與個股 (點此展開)", expanded=True):
+with st.expander("⚙️ 管理群組與個股 (展開編輯)", expanded=True):
     g1, g2 = st.columns(2)
-    new_g = g1.text_input("1. 建立新分類 (如: 航運)")
+    new_g = g1.text_input("1. 建立新分類")
     if g1.button("新增分類"):
         if new_g and new_g not in st.session_state.stock_groups:
             st.session_state.stock_groups[new_g] = []
             st.rerun()
     
     st.write("---")
-    target_g = st.selectbox("2. 選擇要加入的分類", list(st.session_state.stock_groups.keys()))
+    target_g = st.selectbox("2. 選擇分類", list(st.session_state.stock_groups.keys()))
     c_col1, c_col2 = st.columns(2)
-    s_code = c_col1.text_input("3. 股票代碼 (如: 2603)")
-    s_name = c_col2.text_input("4. 股票名稱 (如: 長榮)")
+    s_code = c_col1.text_input("3. 股票代碼 (數字)")
+    s_name = c_col2.text_input("4. 股票名稱 (中文)")
     
-    if st.button("確認加入個股"):
+    if st.button("確認加入"):
         if s_code:
-            # 如果沒輸名字，先看對照表，再沒就寫「台股」
             final_name = s_name if s_name else STOCK_NAMES.get(s_code, "台股")
             st.session_state.stock_groups[target_g].append({"code": s_code, "name": final_name})
             st.rerun()
 
-# 顯示分組
 for group, stocks in st.session_state.stock_groups.items():
-    st.subheader(f"📁 {group}")
-    if not stocks:
-        st.caption("尚無個股")
-        continue
-    
-    for item in stocks:
-        try:
-            code = item['code']
-            display_name = item['name']
-            t = yf.Ticker(f"{code}.TW")
-            h = t.history(period="2d")
-            if not h.empty:
-                cur = h['Close'].iloc[-1]
-                prev = h['Close'].iloc[0]
-                diff = cur - prev
-                pct = (diff / prev) * 100
-                p_mark = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
-                
-                sc1, sc2, sc3, sc4 = st.columns([2, 1.5, 2, 1])
-                sc1.write(f"**{code} {display_name}**")
-                sc2.write(f"價: {cur:.2f}")
-                sc3.write(f"{p_mark} {diff:+.2f} ({pct:+.2f}%)")
-                if sc4.button("❌", key=f"del_{group}_{code}"):
-                    st.session_state.stock_groups[group].remove(item)
-                    st.rerun()
-        except:
-            st.caption(f"{item['code']} 讀取中...")
-
-st.divider()
-
-# --- 4. 討論筆記紀錄 ---
-st.header("📝 討論筆記紀錄")
-with st.form("note_final_v1", clear_on_submit=True):
-    n1, n2 = st.columns(2)
-    nt = n1.text_input("議題主題")
-    nk = n2.text_input("標籤 (逗號隔開)")
-    nc = st.text_area("討論筆記")
-    if st.form_submit_button("儲存紀錄"):
-        if nt:
-            st.session_state.notes.append({"T": nt, "K": [k.strip() for k in nk.split(",")], "C": nc})
-            st.success("儲存成功！")
-
-if st.session_state.notes:
-    all_k = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
-    sel = st.multiselect("💡 點選標籤過濾議題", all_k)
-    for n in reversed(st.session_state.notes):
-        if not sel or any(tag in sel for tag in n["K"]):
-            with st.expander(f"📌 {n['T']} ({', '.join(n['K'])})"):
-                st.write(n['C'])
+    st.subheader(f"
