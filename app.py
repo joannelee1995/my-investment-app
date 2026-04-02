@@ -6,101 +6,126 @@ from datetime import datetime
 
 st.set_page_config(page_title="台股投資戰情室 3.0", layout="wide")
 
-# --- 1. 置頂：大盤狀況 (加入量能呈現) ---
+# 強制台股配色 CSS
+st.markdown("""
+    <style>
+    [data-testid="stMetricDelta"] svg { display: none; } /* 隱藏預設箭頭 */
+    .red-up { color: #FF0000 !important; }
+    .green-down { color: #008000 !important; }
+    </style>
+    """, unsafe_content_code=True)
+
+# 初始化資料
+if 'stock_groups' not in st.session_state:
+    st.session_state.stock_groups = {"電子": ["2330"], "金融": ["2881"], "ETF": ["0050"]}
+if 'notes' not in st.session_state: st.session_state.notes = []
+
+# --- 1. 置頂：大盤狀況 ---
 st.title("🇹🇼 台股投資戰情室 3.0")
 try:
     twii = yf.Ticker("^TWII")
-    # 抓取近 5 日數據以比較量能
     hist = twii.history(period="5d")
     now = hist.iloc[-1]
     prev = hist.iloc[-2]
     
-    avg_vol = hist['Volume'].mean() # 5日均量
-    vol_ratio = (now['Volume'] / avg_vol) # 今日量能比
-    
-    c1, c2, c3, c4 = st.columns(4)
     change = now['Close'] - prev['Close']
     pct = (change / prev['Close']) * 100
     
-    c1.metric("加權指數", f"{now['Close']:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
-    c2.metric("今日成交量", f"{now['Volume']/10**8:.2f} 億", f"{(now['Volume']-prev['Volume'])/10**8:+.2f} 億")
+    # 台灣成交量通常以「億元」計，yfinance 抓的是「股數/張數單位」，這裡做近似轉換
+    vol_amt = now['Volume'] / 10**6 # 粗略轉換
+    avg_vol = hist['Volume'].mean()
+    vol_ratio = now['Volume'] / avg_vol
     
-    # 量能視覺化標示
-    vol_status = "量增" if now['Volume'] > prev['Volume'] else "量縮"
-    c3.write(f"**量能狀態：** {vol_status}")
-    c3.progress(min(vol_ratio/2, 1.0), text=f"量能比: {vol_ratio:.2f}x")
+    c1, c2, c3 = st.columns(3)
+    # 台灣配色：漲紅跌綠
+    d_color = "normal" if change >= 0 else "inverse" 
+    c1.metric("加權指數", f"{now['Close']:,.2f}", f"{change:+.2f} ({pct:+.2f}%)", delta_color=d_color)
+    c2.metric("預估成交量指標", f"{vol_amt:,.0f} 單位", f"量能比: {vol_ratio:.2f}x")
     
-    c4.write(f"**最後更新：** {datetime.now().strftime('%H:%M:%S')}")
+    with c3:
+        st.write(f"**市場狀態：** {'🔴 多方佔優' if change > 0 else '🟢 空方回檔'}")
+        st.caption("量能比 > 1 代表今日交易比過去5日平均更熱絡")
 except:
-    st.error("大盤數據讀取失敗")
+    st.error("大盤數據讀取中...")
 
 st.divider()
 
-# --- 2. 每日財經精選 (模擬新聞摘要功能) ---
+# --- 2. 財經焦點 ---
 st.header("📰 今日財經焦點")
-news_col1, news_col2, news_col3 = st.columns(3)
 try:
-    # 這裡利用 yfinance 抓取大盤相關新聞標題
     news = twii.news[:3]
-    cols = [news_col1, news_col2, news_col3]
-    for i, item in enumerate(news):
-        with cols[i]:
-            st.info(f"**{item['title']}**")
-            st.caption(f"來源: {item['publisher']}")
-            st.write(f"[閱讀全文]({item['link']})")
+    if news:
+        cols = st.columns(3)
+        for i, item in enumerate(news):
+            with cols[i]:
+                st.info(f"**{item['title']}**")
+                st.write(f"[點此閱讀原文]({item['link']})")
+    else:
+        st.write("目前無即時新聞，請稍後再試。")
 except:
-    st.write("暫時無法取得新聞資訊")
+    st.write("新聞加載失敗")
 
 st.divider()
 
-# --- 3. 自選股分門別類 ---
+# --- 3. 自選股群組管理 (含刪除功能) ---
 st.header("🗂️ 自選股群組管理")
 
-# 初始化分類與個股資料
-if 'stock_groups' not in st.session_state:
-    st.session_state.stock_groups = {
-        "電子/半導體": ["2330", "2454"],
-        "金融": ["2881", "2882"],
-        "ETF": ["0050", "00878"],
-        "食品/傳產": []
-    }
-
-# 新增/管理分類
-with st.expander("⚙️ 管理分類與新增個股"):
-    g_col1, g_col2, g_col3 = st.columns(3)
-    new_g = g_col1.text_input("建立新分類 (如: 航運)")
+with st.expander("⚙️ 管理群組與新增個股"):
+    g_col1, g_col2 = st.columns(2)
+    new_g = g_col1.text_input("建立新分類")
     if g_col1.button("新增分類"):
         if new_g and new_g not in st.session_state.stock_groups:
             st.session_state.stock_groups[new_g] = []
     
     target_g = g_col2.selectbox("選擇分類", list(st.session_state.stock_groups.keys()))
-    s_code = g_col3.text_input("輸入代碼 (如: 2603)")
-    if g_col3.button("將個股加入此分類"):
+    s_code = g_col2.text_input("輸入代碼 (如: 2454)")
+    if g_col2.button("加入個股"):
         if s_code and s_code not in st.session_state.stock_groups[target_g]:
             st.session_state.stock_groups[target_g].append(s_code)
 
-# 呈現分類清單
+# 顯示分組與刪除鍵
 for group, stocks in st.session_state.stock_groups.items():
-    if stocks:
-        st.subheader(f"📁 {group}")
-        rows = []
-        for code in stocks:
-            try:
-                t = yf.Ticker(f"{code}.TW")
-                h = t.history(period="2d")
-                cur = h['Close'].iloc[-1]
-                prev = h['Close'].iloc[0]
-                diff = cur - prev
-                diff_p = (diff / prev) * 100
-                rows.append({
-                    "代碼": code,
-                    "現價": f"{cur:.2f}",
-                    "漲跌": f"{diff:+.2f}",
-                    "幅 %": f"{diff_p:+.2f}%",
-                    "趨勢": "🔴" if diff > 0 else "🟢"
-                })
-            except: continue
-        st.table(pd.DataFrame(rows))
+    st.subheader(f"📁 {group}")
+    if not stocks:
+        st.write("目前尚無個股")
+        continue
+    
+    for code in stocks:
+        try:
+            t = yf.Ticker(f"{code}.TW")
+            h = t.history(period="2d")
+            cur = h['Close'].iloc[-1]
+            prev = h['Close'].iloc[0]
+            diff = cur - prev
+            p_str = "🔴" if diff > 0 else "🟢" if diff < 0 else "⚪"
+            
+            sc1, sc2, sc3, sc4, sc5 = st.columns([1,1,1,1,1])
+            sc1.write(f"**{code}**")
+            sc2.write(f"價: {cur:.2f}")
+            sc3.write(f"{p_str} {diff:+.2f}")
+            if sc5.button("❌", key=f"del_{group}_{code}"):
+                st.session_state.stock_groups[group].remove(code)
+                st.rerun()
+        except:
+            st.write(f"代碼 {code} 讀取失敗")
 
 st.divider()
-# (保留原有的筆記與資產配置功能...)
+
+# --- 4. 討論紀錄 (心智圖概念) ---
+st.header("📝 我與爸爸的討論紀錄")
+with st.form("note_form", clear_on_submit=True):
+    n_c1, n_c2 = st.columns(2)
+    nt = n_c1.text_input("議題主題")
+    nk = n_c2.text_input("關鍵標籤 (逗號隔開)")
+    nc = st.text_area("對話重點筆記")
+    if st.form_submit_button("儲存這週討論"):
+        st.session_state.notes.append({"T": nt, "K": [k.strip() for k in nk.split(",")], "C": nc})
+
+if st.session_state.notes:
+    all_tags = list(set([k for n in st.session_state.notes for k in n["K"] if k]))
+    sel_tags = st.multiselect("💡 點選標籤查看關聯議題", all_tags)
+    
+    for n in reversed(st.session_state.notes):
+        if not sel_tags or any(tag in sel_tags for tag in n["K"]):
+            with st.expander(f"📌 {n['T']} | 標籤: {', '.join(n['K'])}"):
+                st.write(n['C'])
