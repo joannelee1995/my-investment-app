@@ -13,7 +13,7 @@ st.markdown("<style>[data-testid='stMetricDelta'] svg { display: none; }</style>
 SP_URL = "https://docs.google.com/spreadsheets/d/1pSVEg5J_-tg0wetPxNUVb9cU6kapUL_NIEV_Xz84PDM/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- A. 處理刪除請求 (維持邏輯) ---
+# --- A. 處理刪除請求 ---
 query_params = st.query_params
 if "delete_code" in query_params:
     try:
@@ -28,33 +28,30 @@ if "delete_code" in query_params:
     except:
         st.query_params.clear()
 
-# --- B. 寬容版讀取邏輯 (修復個股不見的問題) ---
+# --- B. 讀取與洗滌邏輯 ---
 @st.cache_data(ttl=5)
-def load_all_data_relaxed():
+def load_data_final_fix():
     try:
-        # 讀取股票
         s_raw = conn.read(spreadsheet=SP_URL, worksheet="stocks", ttl=0)
-        if s_raw is not None and not s_raw.empty:
-            s_df = s_raw.copy()
-            # 強制將代碼轉為字串並去除 .0 與空格
-            s_df['code'] = s_df['code'].astype(str).str.replace(".0", "", regex=False).str.strip()
-            # 只要不是真正的 nan 或空值就留下
-            s_df = s_df[~s_df['code'].isin(['nan', 'NaN', 'None', ''])]
-        else:
-            s_df = pd.DataFrame(columns=["group", "code", "name"])
-            
-        # 讀取筆記
         n_raw = conn.read(spreadsheet=SP_URL, worksheet="notes", ttl=0)
-        if n_raw is not None and not n_raw.empty:
-            n_df = n_raw.dropna(subset=['title']).copy()
+        
+        if s_raw is not None and not s_raw.empty:
+            df = s_raw.copy()
+            df['code'] = df['code'].astype(str).str.replace(".0", "", regex=False).str.strip()
+            df = df[~df['code'].isin(['nan', 'NaN', 'None', ''])]
+            df = df.dropna(subset=['group', 'code'])
         else:
-            n_df = pd.DataFrame(columns=["title", "tags", "content", "date"])
-            
-        return s_df, n_df
+            df = pd.DataFrame(columns=["group", "code", "name"])
+
+        if n_raw is not None and not n_raw.empty:
+            nf = n_raw.dropna(subset=['title']).copy()
+        else:
+            nf = pd.DataFrame(columns=["title", "tags", "content", "date"])
+        return df, nf
     except:
         return pd.DataFrame(columns=["group", "code", "name"]), pd.DataFrame(columns=["title", "tags", "content", "date"])
 
-stocks_df, notes_df = load_all_data_relaxed()
+stocks_df, notes_df = load_data_final_fix()
 
 # 頂部導覽
 c_t, c_s = st.columns([5, 1])
@@ -67,30 +64,29 @@ with c_s:
 # --- 2. 大盤摘要 ---
 try:
     twii = yf.Ticker("^TWII")
-    t_h = twii.history(period="5d")
+    t_h = twii.history(period="3d")
     if not t_h.empty:
         now_c, pre_c = t_h.iloc[-1]['Close'], t_h.iloc[-2]['Close']
         diff, pct = now_c - pre_c, (now_c - pre_c)/pre_c * 100
         icon = "🔴" if diff > 0 else "🟢"
         c1, c2, c3 = st.columns(3)
         c1.metric("加權指數", f"{now_c:,.0f}", f"{icon} {diff:+.2f} ({pct:+.2f}%)")
-        c2.metric("數據狀態", "✅ 已連線", "")
+        c2.metric("連線狀態", "✅ 正常", "")
         c3.metric("更新時間", datetime.now().strftime('%H:%M:%S'), "")
 except:
-    st.info("大盤數據讀取中...")
+    pass
 
 st.divider()
 
 # --- 3. 管理中心 ---
 with st.expander("⚙️ 管理中心", expanded=False):
-    # 新增個股
     with st.container(border=True):
         st.markdown("#### 🚀 新增個股 / ETF")
         g_opts = list(stocks_df['group'].unique()) if not stocks_df.empty else []
         c1, c2, c3 = st.columns([2, 1, 1])
-        with c1: t_g = st.selectbox("目標群組", g_opts if g_opts else ["請先建立"], key="m_g_v")
-        with c2: i_c = st.text_input("代碼", key="m_c_v")
-        with c3: i_n = st.text_input("名稱", key="m_n_v")
+        with c1: t_g = st.selectbox("目標群組", g_opts if g_opts else ["請先建立"], key="add_g_v")
+        with c2: i_c = st.text_input("代碼", key="add_c_v")
+        with c3: i_n = st.text_input("名稱", key="add_n_v")
         if st.button("🌟 存入雲端", use_container_width=True, type="primary"):
             if i_c and t_g != "請先建立":
                 clean = stocks_df[~((stocks_df['group'] == t_g) & (stocks_df['code'] == "9999"))]
@@ -99,12 +95,11 @@ with st.expander("⚙️ 管理中心", expanded=False):
                 st.cache_data.clear()
                 st.rerun()
     
-    # 群組管理
     col_l, col_r = st.columns(2)
     with col_l:
         with st.container(border=True):
             st.markdown("#### 📂 新建群組")
-            n_g_inp = st.text_input("群組名稱", key="new_g_inp")
+            n_g_inp = st.text_input("群組名稱", key="new_g_f")
             if st.button("建立群組", use_container_width=True):
                 if n_g_inp:
                     new_row = pd.DataFrame([{"group": n_g_inp, "code": "9999", "name": "PH"}])
@@ -114,14 +109,14 @@ with st.expander("⚙️ 管理中心", expanded=False):
     with col_r:
         with st.container(border=True):
             st.markdown("#### 🗑️ 刪除管理")
-            d_g_sel = st.selectbox("選取群組", ["請選擇"] + g_opts, key="del_g_sel")
+            d_g_sel = st.selectbox("選取群組", ["請選擇"] + g_opts, key="del_g_f")
             if st.button("刪除群組", use_container_width=True):
                 if d_g_sel != "請選擇":
                     conn.update(spreadsheet=SP_URL, worksheet="stocks", data=stocks_df[stocks_df['group'] != d_g_sel])
                     st.cache_data.clear()
                     st.rerun()
 
-# --- 4. 個股清單 (修正顯示邏輯) ---
+# --- 4. 個股清單 ---
 if not stocks_df.empty:
     for g in stocks_df['group'].unique():
         if pd.isna(g) or str(g) == 'nan': continue
@@ -135,9 +130,7 @@ if not stocks_df.empty:
                 
                 try:
                     success = False
-                    # 自動補零 (針對 0050 等)
                     display_code = t_c.zfill(4) if (t_c.isdigit() and len(t_c) < 4) else t_c
-                    
                     for suffix in [".TW", ".TWO"]:
                         tk = yf.Ticker(f"{display_code}{suffix}")
                         h = tk.history(period="2d")
@@ -155,4 +148,34 @@ if not stocks_df.empty:
                                     <div style="font-size: 1rem; font-weight: 700;">{row['name']}</div>
                                 </div>
                                 <div style="flex: 1.2; text-align: center; font-size: 1.15rem; font-weight: 800;">{cp:.2f}</div>
-                                <div style="flex: 1.8; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 12px
+                                <div style="flex: 1.8; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 12px;">
+                                    <div style="color: {color}; font-size: 0.85rem;"><b>{m_i} {abs(d):.2f}</b><br><small>({p:+.2f}%)</small></div>
+                                    <a href="./?{params}" target="_self" style="text-decoration: none; color: #666; font-size: 1.2rem;">×</a>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            success = True; break
+                    if not success:
+                        st.caption(f"⚠️ {display_code} {row['name']} (連線失敗)")
+                except: pass
+
+st.divider()
+
+# --- 5. 雲端筆記區 ---
+st.header("📝 雲端筆記")
+with st.form("note_form_v_final", clear_on_submit=True):
+    n_t = st.text_input("主題")
+    n_k = st.text_input("標籤")
+    n_c = st.text_area("內容")
+    if st.form_submit_button("💾 儲存筆記"):
+        if n_t:
+            new_n = pd.DataFrame([{"title": n_t, "tags": n_k, "content": n_c, "date": datetime.now().strftime("%Y-%m-%d")}])
+            updated_n = pd.concat([notes_df, new_n], ignore_index=True)
+            conn.update(spreadsheet=SP_URL, worksheet="notes", data=updated_n)
+            st.cache_data.clear()
+            st.rerun()
+
+if not notes_df.empty:
+    for _, n in notes_df.iloc[::-1].iterrows():
+        with st.expander(f"📌 {n['title']} ({n['date']})"):
+            st.write(n['content'])
