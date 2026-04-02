@@ -113,28 +113,43 @@ with st.expander("⚙️ 管理中心", expanded=False):
                 st.cache_data.clear()
                 st.rerun()
     # (群組建立/刪除維持不變...)
-
-# --- 4. 個股清單 (HTML 鎖定一行版) ---
+# --- 4. 個股清單 (加入強制顯示過濾) ---
 if not stocks_df.empty:
-    for g in stocks_df['group'].unique():
+    # 確保群組不為 nan
+    valid_groups = [g for g in stocks_df['group'].unique() if pd.notna(g) and str(g) != 'nan']
+    
+    for g in valid_groups:
         st.subheader(f"📁 {g}")
         sub = stocks_df[stocks_df['group'] == g]
+        
         main_col, _ = st.columns([10, 1]) 
         with main_col:
             for _, row in sub.iterrows():
-                t_c = str(row['code'])
-                if t_c == "9999" or t_c == "nan": continue
+                t_c = str(row['code']).strip()
+                
+                # 硬核檢查：如果是 nan、9999、或是空值，絕對不顯示
+                if t_c.lower() in ["nan", "9999", "", "none"] or len(t_c) < 2:
+                    continue
+                
                 try:
+                    # 抓取 Yahoo 資料
                     success = False
                     for suffix in [".TW", ".TWO"]:
                         tk = yf.Ticker(f"{t_c}{suffix}")
+                        # 使用 fast_info 提升速度並減少報錯
                         h = tk.history(period="2d")
                         if not h.empty:
                             cp, pp = h.iloc[-1]['Close'], h.iloc[0]['Close']
-                            d, p = cp - prev['Close'], ((cp - pp)/pp)*100 # 修正漲跌參考點
-                            color = "#ff4b4b" if cp > pp else "#00ff41" if cp < pp else "#ffffff"
-                            m_icon = "▲" if cp > pp else "▼" if cp < pp else "─"
+                            # 排除抓到空價格的情況
+                            if pd.isna(cp): continue
+                            
+                            d, p = cp - pp, ((cp - pp)/pp)*100
+                            color = "#ff4b4b" if d > 0 else "#00ff41" if d < 0 else "#ffffff"
+                            m_icon = "▲" if d > 0 else "▼" if d < 0 else "─"
+                            
+                            # 刪除連結
                             params = urllib.parse.urlencode({"delete_code": t_c, "delete_group": g})
+                            
                             st.markdown(f"""
                             <div style="display: flex; justify-content: space-between; align-items: center; background: #262730; padding: 10px 15px; border-radius: 8px; margin-bottom: 3px; border-left: 4px solid {color};">
                                 <div style="flex: 2;">
@@ -142,18 +157,18 @@ if not stocks_df.empty:
                                     <div style="font-size: 1rem; font-weight: 700;">{row['name']}</div>
                                 </div>
                                 <div style="flex: 1.2; text-align: center; font-size: 1.1rem; font-weight: 800;">{cp:.2f}</div>
-                                <div style="flex: 1.8; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
-                                    <div style="color: {color}; font-size: 0.85rem;"><b>{m_icon} {abs(cp-pp):.2f}</b><br><small>({p:+.2f}%)</small></div>
-                                    <a href="./?{params}" target="_self" style="text-decoration: none; color: #555; font-size: 1.2rem; font-weight: bold;">×</a>
+                                <div style="flex: 1.8; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 12px;">
+                                    <div style="color: {color}; font-size: 0.85rem;"><b>{m_icon} {abs(d):.2f}</b><br><small>({p:+.2f}%)</small></div>
+                                    <a href="./?{params}" target="_self" style="text-decoration: none; color: #666; font-size: 1.2rem; font-weight: bold; padding: 0 5px;">×</a>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
-                            success = True; break
-                except: pass
-
-st.divider()
-st.header("📝 雲端筆記")
-# (筆記區邏輯...)
+                            success = True
+                            break
+                    if not success:
+                        pass # 抓不到就不顯示，保持畫面乾淨
+                except:
+                    continue
 
 # ==========================================
 # 6. 雲端筆記區
